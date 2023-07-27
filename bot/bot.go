@@ -75,10 +75,10 @@ func (b *Bot) showSubs() {
 	keybuttons := [][]echotron.InlineKeyboardButton{}
 
 	for _, v := range towns {
-		callbackdata := fmt.Sprintf("unsub:%s", v.ID)
+		callbackdata := fmt.Sprintf("propose-unsub:%s", v.ID)
 
 		button := []echotron.InlineKeyboardButton{{
-			Text:         v.Name,
+			Text:         fmt.Sprintf("❌ %s", v.Name),
 			CallbackData: callbackdata,
 		}}
 
@@ -89,7 +89,7 @@ func (b *Bot) showSubs() {
 		InlineKeyboard: keybuttons,
 	}
 
-	b.SendMessage("Sei iscritto a queste città. Toccane una per annullare l'iscrizione.", b.chatID,
+	b.SendMessage("Sei iscritto a questi canali. Toccane uno per annullare l'iscrizione.", b.chatID,
 		&echotron.MessageOptions{
 			ReplyMarkup: keyboard,
 		},
@@ -119,7 +119,11 @@ func (b *Bot) showList() {
 		InlineKeyboard: keybuttons,
 	}
 
-	b.SendMessage("Ecco la lista delle città disponibili. Toccane una per iscriverti. Se vuoi suggerire una città da aggiungere,invia un messaggio a @eliseomartelli.", b.chatID,
+	b.SendMessage(`Questa è la lista delle città disponibili. Toccane una per iscriverti.
+
+Successivamente, per visualizzare le tue iscrizioni, scrivi: /iscrizioni.
+
+Se vuoi suggerire una città da aggiungere,invia un messaggio a @eliseomartelli.`, b.chatID,
 		&echotron.MessageOptions{
 			ReplyMarkup: keyboard,
 		},
@@ -129,7 +133,7 @@ func (b *Bot) showList() {
 // Update implements echotron.Bot.
 func (b *Bot) Update(update *echotron.Update) {
 	var functionalMessages map[string]Responder = map[string]Responder{
-		"/lista":      b.showList,
+		"/iscrivi":    b.showList,
 		"/iscrizioni": b.showSubs,
 	}
 
@@ -152,6 +156,12 @@ func (b *Bot) Update(update *echotron.Update) {
 		if strings.HasPrefix(update.CallbackQuery.Data, "unsub:") {
 			b.usubscribe(update)
 		}
+		if strings.HasPrefix(update.CallbackQuery.Data, "propose-unsub:") {
+			b.proposeUnsub(update)
+		}
+		if strings.HasPrefix(update.CallbackQuery.Data, "discard") {
+			b.SendMessage("Perfetto, non annullerò l'iscrizione.", b.chatID, nil)
+		}
 		b.AnswerCallbackQuery(update.CallbackQuery.ID, nil)
 	}
 }
@@ -167,10 +177,34 @@ func (b *Bot) usubscribe(update *echotron.Update) {
 		log.Print(err)
 		return
 	} else {
-		msg := fmt.Sprintf("✅ Hai annullato l'iscrizione a: %s", town.Name)
+		msg := fmt.Sprintf("✅ Hai annullato l'iscrizione a: %s. Per visualizzare tutte le iscrizioni, scrivi: /iscrizioni.", town.Name)
 		b.SendMessage(msg, b.chatID, nil)
-		b.showSubs()
 	}
+}
+
+func (b *Bot) proposeUnsub(update *echotron.Update) {
+	townId := strings.TrimPrefix(update.CallbackQuery.Data, "propose-unsub:")
+	town, err := b.database.GetTownByID(townId)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	msg := fmt.Sprintf("⚠️  Sei sicuro di voler annullare l'iscrizione a %s?", town.Name)
+	keyboard := echotron.InlineKeyboardMarkup{
+		InlineKeyboard: [][]echotron.InlineKeyboardButton{{
+			{
+				Text:         "👍 Sì",
+				CallbackData: fmt.Sprintf("unsub:%s", town.ID),
+			},
+			{
+				Text:         "👎 No",
+				CallbackData: "discard",
+			},
+		}},
+	}
+	b.SendMessage(msg, b.chatID, &echotron.MessageOptions{
+		ReplyMarkup: keyboard,
+	})
 }
 
 func (b *Bot) subscribe(update *echotron.Update) {
@@ -183,9 +217,8 @@ func (b *Bot) subscribe(update *echotron.Update) {
 	if err := b.database.AddSubscription(b.chatID, town.ID); err != nil {
 		log.Print(err)
 	}
-	msg := fmt.Sprintf("✅ Sei iscritto agli aggiornamenti di: %s", town.Name)
+	msg := fmt.Sprintf("✅ Sei iscritto agli aggiornamenti di: %s. Per visualizzare tutte le iscrizioni, scrivi: /iscrizioni", town.Name)
 	b.SendMessage(msg, b.chatID, nil)
-	b.showSubs()
 }
 
 func (b *BotShim) SendUpdates(parser *rss.RSS, town db.Town) {
@@ -205,7 +238,7 @@ func (b *BotShim) SendUpdates(parser *rss.RSS, town db.Town) {
 	for _, subscriber := range subscribers {
 		for _, item := range items {
 			msg := fmt.Sprintf(
-				"<b><i>%s</i></b>\n\n<b>%s</b>\n\n%s",
+				"Aggiornamento da: <b>%s</b>\n\n%s\n\n%s",
 				town.Name,
 				item.Title,
 				item.Link,
